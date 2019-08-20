@@ -25,14 +25,14 @@ day_frequencies <- merge(days, day_frequencies, by.x = "days", by.y = "Var1", al
 day_frequencies[is.na(day_frequencies)] <- 0
 
 # ABC model
-# tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)*100
-#Csp_sample = list(c("unif", 0, 1e-4))
-#ABC_Beaumont <- ABC_sequential(method="Beaumont", model=calculateDiffInX, prior=Csp_sample, 
-                               #nb_simul=100, summary_stat_target = (0), tolerance_tab = tolerance, verbose = TRUE)
+tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)*100
+Csp_sample = list(c("unif", 0, 1e-4))
+ABC_Beaumont <- ABC_sequential(method="Beaumont", model=calculateDiffInX, prior=Csp_sample, 
+                               nb_simul=100, summary_stat_target = (0), tolerance_tab = tolerance, verbose = TRUE)
 
 calculateDiffInX <- function(Csp) {
   sumSquaresCountries <- c()
-  for (i in 1:1) {
+  for (i in 1:length(countries)) {
     domestic_outbreaks = subset(mcr1_df, mcr1_df$Country.Codes == countries[i])
     incomingX <- c()
     for (k in first_outbreak:last_outbreak) {
