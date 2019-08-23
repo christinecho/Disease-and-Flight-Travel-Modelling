@@ -22,7 +22,7 @@ prevalence_max <- 1e-3
 par(mfrow = c(2, 2))
 par(mar = c(1,2,1,1))
 
-for(i in 1:length(countries)) {
+for(i in 6:length(countries)) {
   if (is.na(i)) next
   # compute prevalence, larger prevalence if gdp is lower
   curr_country_code <- as.character(allcountries[i])
@@ -30,7 +30,7 @@ for(i in 1:length(countries)) {
   if ((!curr_country_code %in% pop_data$iso3c) | (!curr_country_code %in% gdp_per_capita$countrycodes)) next
   N = subset(pop_data, iso3c == curr_country_code)$value
   country_rank <- gdp_per_capita[which(gdp_per_capita$countrycodes == curr_country_code), ]$rank
-  country_prevalence_val <- prevalence_min + (prevalence_max - prevalence_min) * (nrow(gdp_per_capita)-country_rank)/nrow(gdp_per_capita)
+  country_prevalence_val <- prevalence_min + (prevalence_max - prevalence_min) * country_rank/nrow(gdp_per_capita)
   
   # bin experimental values by year
   country_outbreaks <- mcr1_df[which(mcr1_df$Country.Codes == curr_country_code), ]
@@ -119,15 +119,15 @@ for(i in 1:length(countries)) {
   }
   
   # ABC model
-  tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)/100000
+  tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)/10000
   epsilon_sample = list(c("unif", 0, 0.05))
   ABC_Beaumont <- ABC_sequential(method="Beaumont", model=runSimulation, prior=epsilon_sample, 
-                                 nb_simul=1000, summary_stat_target = (0), tolerance_tab = tolerance, verbose = TRUE)
+                                 nb_simul=100, summary_stat_target = (0), tolerance_tab = tolerance, verbose = TRUE)
   
   colors = colorRampPalette(brewer.pal(8,"Reds"))(length(tolerance))
   # plot lines converging onto actual line
   for (k in 1:length(tolerance)) {
-    rej <- abc(c(0), ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,2], ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,3], tol = 0.2, method = "rejection")
+    rej <- abc(c(0), ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,2], ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,3], tol = 0.1, method = "rejection")
     new_epsilon = median(rej$unadj.values)
     beta = N/S*(new_epsilon*rt+(1-new_epsilon)*rw)
     params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = new_epsilon, rnovo = rnovo, N=N);
@@ -137,6 +137,7 @@ for(i in 1:length(countries)) {
     for (j in 0:time_span) {
       a[j+1] <- r[which(abs(r[,"time"]-j)==min(abs(r[, "time"]-j))), ]["X"]
     }
+    print(new_epsilon)
     matlines(0:time_span, a, col = colors[k])
   }
   title(curr_country_code, line = -2)
