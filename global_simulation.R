@@ -1,9 +1,22 @@
 mcr1_df = read.csv("/Users/christinecho/Documents/Annual-data/PEI/mcr1_edited.csv", stringsAsFactors = FALSE)
 countryData = read.csv("/Users/christinecho/Documents/Annual-data/PEI/countrydata.csv", stringsAsFactors = FALSE)
+countries = countryData$iso3c
 
 # Clean data set, remove data points with NAs and unavailable population/gdp
 mcr1_df = subset(mcr1_df, !is.na(Year) & !is.na(Country.Codes))
-mcr1_df = subset(mcr1_df, Country.Codes %in% countryData$iso3c)
+mcr1_df = subset(mcr1_df, Country.Codes %in% countries)
+
+# sum of passenger volume matrix
+volume = merge(prediction, AirPortInfoWithCountries[, c("NodeName", "codes")], by.x=c("Origin"), by.y=c("NodeName"))
+volume = merge(volume, AirPortInfoWithCountries[, c("NodeName", "codes")], by.x=c("Destination"), by.y=c("NodeName"))
+names(volume)[names(volume) == "codes.x"] <- "origin_code"
+names(volume)[names(volume) == "codes.y"] <- "destination_code"
+volume = subset(volume, volume$origin_code %in% countries & volume$destination_code %in% countries)
+volume = volume[volume$origin_code != volume$destination_code, ]
+volume = with(volume, tapply(PredMu, list(origin_code, destination_code), FUN = sum))
+volume[is.na(volume)] = 0
+colnames(volume) = paste0("O",1:numCountries)
+rownames(volume) = paste0("D",1:numCountries)
 
 # Model Parameters
 numCountries = nrow(countryData)
@@ -48,7 +61,6 @@ domesticTrans = c("S=+1, W=-1", # infected wild type to susceptible
 # domestic transitions
 domesticTransExpress = NULL
 for(i in 1:numCountries) {
-  
   countryExpress = rep(NA, numDomesticTrans)
   for(j in 1:numDomesticTrans) {
     InChain = unlist(strsplit(domesticTrans[j], "="))
@@ -86,8 +98,7 @@ domesticRates = c(
   "(x['X']*params$rx)",
   "(params$beta['B']*x['S']*x['X']/params$N['N'])"
 )
-
-internationalRates = "params$Csp * x['S']*x['X']/params$N['N']*params$passengers['A','B']"
+internationalRates = "(params$Csp * x['S']*x['X']/params$N['N']*params$passengers['D','O'])"
 
 # create text file for rates
 # domestic rates
@@ -102,11 +113,22 @@ for(i in 1:numCountries) {
   domesticRatesExpress = c(domesticRatesExpress, countryExpress)
 }
 
+# international rates
 internationalRatesExpress = NULL
 for (i in 1:numCountries) {
   countryExpress = rep(NA, numCountries-1)
   count = 1
   for(j in 1:numCountries) {
-    InChain = unlist(strsplit())
+    if (i == j) next
+    InChain = unlist(strsplit(internationalRates, "']"))
+    InChainlast = InChain[length(InChain)]
+    str = paste0(paste0(InChain[1:(length(InChain)-1)],i,"']", collapse =""), InChainlast)
+    InChain = unlist(strsplit(str, "',"))
+    InChainlast = InChain[length(InChain)]
+    countryExpress[count] = paste0(paste0(InChain[1:(length(InChain)-1)],j,"',", collapse =""), InChainlast)
+    count = count + 1
   }
+  internationalRatesExpress = c(internationalRatesExpress, countryExpress)
 }
+
+allRatesExpress = c(domesticRatesExpress, internationalRatesExpress)
