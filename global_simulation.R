@@ -1,12 +1,14 @@
+library(adaptivetau)
+
 mcr1_df = read.csv("/Users/christinecho/Documents/Annual-data/PEI/mcr1_edited.csv", stringsAsFactors = FALSE)
 countryData = read.csv("/Users/christinecho/Documents/Annual-data/PEI/countrydata.csv", stringsAsFactors = FALSE)
 countries = countryData$iso3c
 
-# Clean data set, remove data points with NAs and unavailable population/gdp
+# clean data set, remove data points with NAs and unavailable population/gdp
 mcr1_df = subset(mcr1_df, !is.na(Year) & !is.na(Country.Codes))
 mcr1_df = subset(mcr1_df, Country.Codes %in% countries)
 
-# sum of passenger volume matrix
+# passenger volume matrix
 volume = merge(prediction, AirPortInfoWithCountries[, c("NodeName", "codes")], by.x=c("Origin"), by.y=c("NodeName"))
 volume = merge(volume, AirPortInfoWithCountries[, c("NodeName", "codes")], by.x=c("Destination"), by.y=c("NodeName"))
 names(volume)[names(volume) == "codes.x"] <- "origin_code"
@@ -22,6 +24,7 @@ rownames(volume) = paste0("D",1:numCountries)
 numCountries = nrow(countryData)
 numDomesticTrans = 5
 numInternationalTrans = 1
+time = max(mcr1_df$Year) - min(mcr1_df$Year) + 1
 
 # Epidemic Parameters
 rt = 1/7/365
@@ -40,13 +43,20 @@ for (i in 1:numCountries) {
   # TODO: Calculate beta and epsilon. Need to ask Thom about this.
 }
 
+params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = epsilon, rnovo = rnovo)
 #########################################
 # Initial Conditions
 #########################################
 N = countryData$value
-W = N * prevalence
+W = as.integer(N * prevalence)
 S = N-W
+X = rep(0, numCountries)
 
+init.values = c(
+  S = S,
+  W = W,
+  X = X
+)
 #########################################
 # Transitions
 #########################################
@@ -77,10 +87,10 @@ for (i in 1:numCountries) {
   count = 1
   for(j in 1:numCountries) {
     if(i==j) next
-    str1 = paste(c("X",i), collapse = "")
-    str2 = paste(c("=+1, X", j), collapse = "")
+    str1 = paste0(c("X",i), collapse = "")
+    str2 = paste0(c("=+1, X", j), collapse = "")
     str3 = "=-1"
-    countryExpress[count] = paste(c(str1, str2, str3), collapse = "")
+    countryExpress[count] = paste0(c(str1, str2, str3), collapse = "")
     count = count + 1
   }
   internationalTransExpress = c(internationalTransExpress, countryExpress)
@@ -90,7 +100,6 @@ allTransExpress = c(domesticTransExpress, internationalTransExpress)
 #########################################
 # Rates
 #########################################
-
 domesticRates = c(
   "(x['W']*(params$epsilon['E']*params$rt + (1 - params$epsilon['E'])*params$rw))", 
   "(params$beta['B']*x['S']*x['W']/params$N['N'])",
@@ -98,7 +107,7 @@ domesticRates = c(
   "(x['X']*params$rx)",
   "(params$beta['B']*x['S']*x['X']/params$N['N'])"
 )
-internationalRates = "(params$Csp * x['S']*x['X']/params$N['N']*params$passengers['D','O'])"
+internationalRates = "(params$Csp * x['S']*x['X']/params$N['N']*params$volume['D','O'])"
 
 # create text file for rates
 # domestic rates
@@ -132,3 +141,20 @@ for (i in 1:numCountries) {
 }
 
 allRatesExpress = c(domesticRatesExpress, internationalRatesExpress)
+
+
+# Write the transitions list
+allTransitions = paste0("c(", allTransExpress, "),")
+allTransitions[length(allTransitions)] =  substr(allTransitions[length(allTransitions)],1,(nchar(allTransitions[length(allTransitions)])-1))
+transChar = c("transitions = list(", allTransitions, ")")
+write.table(transChar, file = paste0(getwd(),"/expressions.R"), row.names = F, col.names = F, quote = F)
+
+# Write the rates function
+allRates = paste0(allRatesExpress, ",")
+allRates[length(allRates)] =  substr(allRates[length(allRates)],1,(nchar(allRates[length(allRates)])-1))
+ratesChar = c("rates <- function(x, params, t) {", "return(c(", allRates, "))}")
+write.table(ratesChar, file = paste0(getwd(),"/expressions.R"), append = T, row.names = F, col.names = F, quote = F)
+
+# Run simulation
+source(paste0(getwd(),"/expressions.R"))
+r = ssa.adaptivetau(init.values, transitions, rates, params, tf=time)
