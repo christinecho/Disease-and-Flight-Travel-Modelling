@@ -22,7 +22,7 @@ prevalence_max <- 1e-3
 par(mfrow = c(2, 2))
 par(mar = c(1,2,1,1))
 
-for(i in 6:length(countries)) {
+for(i in 1:length(allcountries)) {
   if (is.na(i)) next
   # compute prevalence, larger prevalence if gdp is lower
   curr_country_code <- as.character(allcountries[i])
@@ -41,22 +41,27 @@ for(i in 6:length(countries)) {
   year_frequencies$Var1 = as.numeric(levels(year_frequencies$Var1))[year_frequencies$Var1]
   year_frequencies <- merge(years, year_frequencies, by.x = "years", by.y = "Var1", all=T)
   year_frequencies[is.na(year_frequencies)] <- 0
+  time_span <- max(as.numeric(year_frequencies$years))- min(as.numeric(year_frequencies$years)) + 1
+  if(time_span == 1) next
   
   # other initial values
   W = as.integer(country_prevalence_val * N)
   X = 0
   S = as.integer(N-W-X)
   epsilon = 0.05
-  rt = 1/7/365
-  rx = 1/13/365
-  rw = 1/14/365
+  prop = 1
+  rt = 1/7 * prop
+  rx = 1/13 * prop
+  rw = 1/14 * prop
   beta = N/S*(epsilon*rt+(1-epsilon)*rw)
-  rnovo = 1^-6
-  
+  rnovo = 1e-6
+  set.seed(3)
   init.values = c(
     S = S,   # susceptible humans
     W = W,   # infected wild type humans
     X = X)   # infected resistant humans
+  
+  params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = epsilon, rnovo = rnovo, N=N)
   
   # transitions
   transitions = list(c(S = +1, W = -1), # infected wild type to susceptible
@@ -74,37 +79,42 @@ for(i in 6:length(countries)) {
              params$beta*x["S"]*x["X"]/params$N))
   }
   
-  time_span <- max(as.numeric(year_frequencies$years))- min(as.numeric(year_frequencies$years)) + 1
-  
-  params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = epsilon, rnovo = rnovo, N=N);
-  
   # run simulation
   r = ssa.adaptivetau(init.values, transitions, rates, params, tf=time_span)
   
   # plot experimental values
-  matplot(r[,"time"], r[,c("S","W", "X")], type='l', xlab='Time',
-          ylab='Counts', col = c("black", "red", "blue"), ylim = c(0, 300))
-  legend("right", legend=c("S", "W", "X"), lty=1:3, col=c("black", "red", "blue"))
-  matpoints(as.numeric(year_frequencies$years - first_outbreak), year_frequencies$Freq, pch = 4)
-
+  #matplot(r[,"time"], r[,c("S","W", "X")], type='l', xlab='Time',
+          #ylab='Counts', col = c("black", "red", "blue"), ylim = c(0, 100))
+  #legend("right", legend=c("S", "W", "X"), lty=1:3, col=c("black", "red", "blue"))
+  matplot(as.numeric(year_frequencies$years - first_outbreak), year_frequencies$Freq, pch = 4, type = 'l', ylim = c(0,100))
+  
   # plot initial simulation values
-  for (i in 0:time_span) {
-    matpoints(i, r[which(abs(r[,"time"]-i)==min(abs(r[, "time"]-i))), ]["X"], pch = 2)
-  }
+  #for (i in 0:time_span) {
+    #matpoints(i, r[which(abs(r[,"time"]-i)==min(abs(r[, "time"]-i))), ]["X"], pch = 2)
+  #}
   
   # function to run for abc sequential
   # returns Euclidean distance from simulated and experimental values
-  runSimulation <- function(new_epsilon) {
+  runSimulation <- function(x) {
+    new_epsilon = x[1]
+    rproportion = x[2]
+    rt = 1/7*rproportion
+    rx = 1/13*rproportion
+    rw = 1/14*rproportion
+    N = subset(pop_data, iso3c == curr_country_code)$value
     beta = N/S*(new_epsilon*rt+(1-new_epsilon)*rw)
     params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = new_epsilon, rnovo = rnovo, N=N);
+    
     r = ssa.adaptivetau(init.values, transitions, rates, params, tf=time_span)
     simulated_values <- c()
+    mostRecent = 0
     for (i in 0:(time_span-1)) {
       closest_time <- r[which(abs(r[,"time"]-i)==min(abs(r[, "time"]-i))), ]["X"]
       if(is.na(closest_time)) {
-        simulated_values <- c(simulated_values, 0) #might need to fix this
+        simulated_values <- c(simulated_values, mostRecent) #might need to fix this
       } else {
         simulated_values <- c(simulated_values, closest_time)
+        mostRecent = closest_time
       }
     }
     return(calculateDistance(simulated_values, year_frequencies$Freq))
@@ -119,27 +129,37 @@ for(i in 6:length(countries)) {
   }
   
   # ABC model
-  tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)/10000
-  epsilon_sample = list(c("unif", 0, 0.05))
-  ABC_Beaumont <- ABC_sequential(method="Beaumont", model=runSimulation, prior=epsilon_sample, 
-                                 nb_simul=100, summary_stat_target = (0), tolerance_tab = tolerance, verbose = TRUE)
+  tolerance = c(160, 80, 40, 20, 10, 5, 2.5, 1)/100000
+  epsilon_sample = c("unif", 0, 1)
+  rproportion = c("unif", 0, 1000)
+  prior = list(epsilon_sample, rproportion)
+  ABC_Beaumont <- ABC_sequential(method="Beaumont", model=runSimulation, prior=prior, 
+                                 nb_simul=1000, summary_stat_target=0, tolerance_tab = tolerance, verbose = T)
   
   colors = colorRampPalette(brewer.pal(8,"Reds"))(length(tolerance))
   # plot lines converging onto actual line
   for (k in 1:length(tolerance)) {
-    rej <- abc(c(0), ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,2], ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,3], tol = 0.1, method = "rejection")
-    new_epsilon = median(rej$unadj.values)
+    rej <- abc((0), ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,2:3], ABC_Beaumont[["intermediary"]][[k]][["posterior"]][,4], tol = 0.001, method = "rejection")
+    print(rej$ss)
+    new_epsilon = rej$unadj.values[1]#median(rej$unadj.values[,1])
+    new_proportion = rej$unadj.values[2]#median(rej$unadj.values[,2])
+    rt = 1/7 * new_proportion
+    rw = 1/13 * new_proportion
+    rx = 1/14 * new_proportion
+    N = subset(pop_data, iso3c == curr_country_code)$value
     beta = N/S*(new_epsilon*rt+(1-new_epsilon)*rw)
     params = list(beta = beta, rt = rt, rx = rx, rw = rw, epsilon = new_epsilon, rnovo = rnovo, N=N);
     r = ssa.adaptivetau(init.values, transitions, rates, params, tf=time_span)
+    
     #print(r[which(abs(r[,"time"]-k)==min(abs(r[, "time"]-k))), ]["X"])
-    a<- list()
-    for (j in 0:time_span) {
-      a[j+1] <- r[which(abs(r[,"time"]-j)==min(abs(r[, "time"]-j))), ]["X"]
-    }
-    print(new_epsilon)
-    matlines(0:time_span, a, col = colors[k])
+    matlines(r[,"time"], r[, "X"], col = colors[k])
+    #a<- list()
+    #for (j in 0:time_span) {
+      #a[j+1] <- r[which(abs(r[,"time"]-j)==min(abs(r[, "time"]-j))), ]["X"]
+    #}
+    #matlines(0:time_span, a, col = colors[k])
   }
   title(curr_country_code, line = -2)
   text(4, 9, new_epsilon)
+  text(4, 5, new_proportion)
 }
